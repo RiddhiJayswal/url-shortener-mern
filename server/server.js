@@ -144,9 +144,59 @@ mongoose
     console.log("✅ MongoDB connected");
     console.log("DB Name:", mongoose.connection.name);
     console.log("Host   :", mongoose.connection.host);
-    app.listen(PORT, () => console.log(`API running on http://localhost:${PORT}`));
+    app.listen(PORT, () => console.log(`API running  on http://localhost:${PORT}`));
   })
   .catch((err) => {
     console.error("MongoDB connection error:", err.message);
     process.exit(1);
   });
+
+
+
+// --- admin auth (very simple API-key) ---
+function requireAdmin(req, res, next) {
+  const key = req.header("x-admin-key");
+  if (!key || key !== process.env.ADMIN_API_KEY) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+}
+
+// --- list links with pagination ---
+app.get("/api/admin/links", requireAdmin, async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || "50", 10), 200);
+  const page  = Math.max(parseInt(req.query.page || "1", 10), 1);
+  const skip  = (page - 1) * limit;
+
+  const [rows, total] = await Promise.all([
+    Link.find().sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Link.countDocuments()
+  ]);
+
+  const base = (process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, "");
+
+  res.json({
+    page, limit, total,
+    rows: rows.map(r => ({
+      id: String(r._id),
+      short_code: r.short_code,
+      short_url: `${base}/${r.short_code}`,   // <-- add this
+      original_url: r.original_url,
+      visits: r.visits || 0,
+      createdAt: r.createdAt,
+    }))
+  });
+});
+
+
+// --- totals ---
+app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
+  const [totalLinks, visitsAgg] = await Promise.all([
+    Link.countDocuments(),
+    Link.aggregate([{ $group: { _id: null, visits: { $sum: "$visits" } } }])
+  ]);
+  res.json({
+    total_links: totalLinks,
+    total_visits: visitsAgg[0]?.visits || 0
+  });
+});
