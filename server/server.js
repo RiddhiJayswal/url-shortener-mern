@@ -24,7 +24,56 @@ const nanoid = customAlphabet(
   7
 );
 
-// -------------------- routes--------------------
+/* --------------------------- Utility / Root route --------------------------- */
+app.get("/", (_req, res) => {
+  res.send(
+    "URL Shortener API is live ✅ Try: /api/health, /api/debug/db, /api/debug/count, /api/admin/links"
+  );
+});
+
+/* --------------------------------- Debug ---------------------------------- */
+app.get("/api/debug/db", (_req, res) => {
+  const conn = mongoose.connection;
+  const stateMap = { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" };
+  res.json({
+    connected: conn?.readyState === 1,
+    state: stateMap[conn?.readyState] ?? "unknown",
+    host: conn?.host ?? null,
+    name: conn?.name ?? null, // <-- database name actually in use
+  });
+});
+
+app.get("/api/debug/count", async (_req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    if (!db) return res.status(503).json({ error: "DB not ready yet" });
+    const count = await db.collection("links").countDocuments();
+    res.json({ links_count: count });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Failed to count documents" });
+  }
+});
+
+// Quick admin view (development only)
+app.get("/api/admin/links", async (_req, res) => {
+  try {
+    const db = mongoose.connection.db;
+    if (!db) return res.status(503).json({ error: "DB not ready yet" });
+    const docs = await db
+      .collection("links")
+      .find({})
+      .sort({ _id: -1 })
+      .limit(50)
+      .toArray();
+    res.json(docs);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Failed to fetch links" });
+  }
+});
+
+/* --------------------------------- API ------------------------------------ */
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 function sanitizeCode(code = "") {
@@ -87,16 +136,15 @@ app.get("/:shortcode", async (req, res) => {
     res.status(500).send("Server error");
   }
 });
-// ----------------------------------------------------------------------
 
-// connect DB THEN start server (after routes are defined)
+/* ----------------------- Connect DB THEN start server ---------------------- */
 mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => {
     console.log("✅ MongoDB connected");
-    app.listen(PORT, () =>
-      console.log(`API running on http://localhost:${PORT}`)
-    );
+    console.log("DB Name:", mongoose.connection.name);
+    console.log("Host   :", mongoose.connection.host);
+    app.listen(PORT, () => console.log(`API running on http://localhost:${PORT}`));
   })
   .catch((err) => {
     console.error("MongoDB connection error:", err.message);
