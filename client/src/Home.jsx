@@ -8,9 +8,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // small helper to truncate long urls for display
+  const pretty = (s = "", max = 50) => (s.length > max ? s.slice(0, max) + "..." : s);
+
   const submit = async (e) => {
     e.preventDefault();
-    setError(""); setResult(null); setCopied(false);
+    setError("");
+    setResult(null);
+    setCopied(false);
 
     if (!/^https?:\/\//i.test(url)) {
       setError("URL must start with http:// or https://");
@@ -22,7 +27,7 @@ export default function App() {
       const res = await fetch(`${import.meta.env.VITE_API_BASE}/api/shorten`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to shorten");
@@ -45,6 +50,7 @@ export default function App() {
   return (
     <div className="container">
       <h2>🔗 URL Shortener</h2>
+
       <form onSubmit={submit} className="form">
         <input
           value={url}
@@ -61,14 +67,25 @@ export default function App() {
       {result && (
         <div className="result">
           <div className="short-link">
-            <a href={result.short_url} target="_blank">{result.short_url}</a>
+            <a href={result.short_url} target="_blank" rel="noopener noreferrer">
+              {result.short_url}
+            </a>
             <button onClick={copyToClipboard}>
               {copied ? "✅ Copied" : "📋 Copy"}
             </button>
           </div>
-          <div className="original-link">
-            Original: <span>{result.original_url}</span>
-          </div>
+
+          <p className="original-link">
+            Original:{" "}
+            <a
+              href={result.original_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={result.original_url}
+            >
+              {pretty(result.original_url, 80)}
+            </a>
+          </p>
         </div>
       )}
     </div>
