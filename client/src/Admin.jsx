@@ -73,31 +73,28 @@ export default function Admin() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => {
-            const base = import.meta.env.VITE_API_BASE?.replace(/\/+$/, "") || "";
-            const shortHref = r.short_url || (r.short_code ? `${base}/${r.short_code}` : "");
-
-            return (
-              <tr key={r.id || r._id}>
-                <td>{new Date(r.createdAt).toLocaleString()}</td>
-                <td>
-                  {shortHref ? (
-                    <a href={shortHref} target="_blank" rel="noreferrer">{shortHref}</a>
-                  ) : (
-                    <span className="muted-dash">—</span>
-                  )}
-                </td>
-                <td className="truncate" title={r.original_url}>
-                  {r.original_url}
-                </td>
-                <td>{r.visits}</td>
-              </tr>
-            );
-          })}
-          {!rows.length && (
-            <tr><td colSpan="4">No data yet</td></tr>
-          )}
-        </tbody>
+          {rows.map(r => (
+            <tr key={r.id || r._id}>
+              <td>{new Date(r.createdAt).toLocaleString()}</td>
+              <td>
+                {r.short_url ? (
+                  <a href={r.short_url} target="_blank" rel="noreferrer">{r.short_url}</a>
+                ) : (
+                  <a
+                    href={`${import.meta.env.VITE_SHORT_BASE?.replace(/\/+$/, "")}/${r.short_code}`}
+                    target="_blank" rel="noreferrer"
+                  >
+                    {(import.meta.env.VITE_SHORT_BASE || "").replace(/\/+$/, "") + "/" + r.short_code}
+                  </a>
+                )}
+              </td>
+              <td title={r.original_url} style={{maxWidth:420, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                {r.original_url}
+              </td>
+              <td>{r.visits}</td>
+            </tr>
+          ))}
+      </tbody>
       </table>
 
       <div className="pager">

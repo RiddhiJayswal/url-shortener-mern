@@ -17,12 +17,23 @@ app.use(
   })
 );
 
-const PORT = process.env.PORT || 5000;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-const nanoid = customAlphabet(
-  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  7
-);
+// POST /api/shorten
+app.post("/api/shorten", async (req, res) => {
+  if (existing) {
+    return res.json({
+      short_code: existing.short_code,
+      short_url: makeShortUrl(existing.short_code),
+      original_url: existing.original_url,
+    });
+  }
+  const doc = await Link.create({ original_url: url, short_code });
+  return res.status(201).json({
+    short_code: doc.short_code,
+    short_url: makeShortUrl(doc.short_code),
+    original_url: doc.original_url,
+  });
+});
+
 
 /* --------------------------- Utility / Root route --------------------------- */
 app.get("/", (_req, res) => {
@@ -56,22 +67,26 @@ app.get("/api/debug/count", async (_req, res) => {
 });
 
 // Quick admin view (development only)
-app.get("/api/admin/links", async (_req, res) => {
-  try {
-    const db = mongoose.connection.db;
-    if (!db) return res.status(503).json({ error: "DB not ready yet" });
-    const docs = await db
-      .collection("links")
-      .find({})
-      .sort({ _id: -1 })
-      .limit(50)
-      .toArray();
-    res.json(docs);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: "Failed to fetch links" });
-  }
+// GET /api/admin/links
+app.get("/api/admin/links", async (req, res) => {
+  const rows = await Link.find()
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean();
+
+  res.json({
+    rows: rows.map(r => ({
+      id: r._id,
+      createdAt: r.createdAt,
+      original_url: r.original_url,
+      visits: r.visits,
+      short_code: r.short_code,
+      short_url: makeShortUrl(r.short_code), 
+    })),
+  });
 });
+
 
 /* --------------------------------- API ------------------------------------ */
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
