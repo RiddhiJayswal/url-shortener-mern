@@ -1,12 +1,9 @@
 {
   "rewrites": [
-    {
-      "source": "/:shortcode",
-      "destination": "https://url-shortener-mern-api.onrender.com/:shortcode"
-    },
-    {
-      "source": "/api/:path*",
-      "destination": "https://url-shortener-mern-api.onrender.com/api/:path*"
-    }
+    { "source": "/api/:path*", "destination": "https://url-shortener-mern-api.onrender.com/api/:path*" },
+    { "source": "/:shortcode([A-Za-z0-9_-]{3,30})", "destination": "https://url-shortener-mern-api.onrender.com/:shortcode" },
+
+    { "source": "/(.*)", "destination": "/" }
   ]
 }
+

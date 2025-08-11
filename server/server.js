@@ -9,40 +9,64 @@ import Link from "./models/Link.js";
 
 dotenv.config();
 
+/* ============================== Setup =============================== */
+
 const app = express();
+const PORT = process.env.PORT || 5000;
+const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
+const nanoid = customAlphabet(
+  "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  7
+);
+
+// CORS: comma-separated list or "*"
+const allowedOrigins = (process.env.CORS_ORIGIN || "*")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
 app.use(express.json());
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN?.split(",") || "*",
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.includes("*") || allowedOrigins.includes(origin)) {
+        return cb(null, true);
+      }
+      return cb(new Error(`CORS blocked: ${origin}`), false);
+    },
+    credentials: false,
   })
 );
 
-// POST /api/shorten
-app.post("/api/shorten", async (req, res) => {
-  if (existing) {
-    return res.json({
-      short_code: existing.short_code,
-      short_url: makeShortUrl(existing.short_code),
-      original_url: existing.original_url,
-    });
-  }
-  const doc = await Link.create({ original_url: url, short_code });
-  return res.status(201).json({
-    short_code: doc.short_code,
-    short_url: makeShortUrl(doc.short_code),
-    original_url: doc.original_url,
-  });
-});
+/* ============================ Utilities ============================= */
 
+function sanitizeCode(code = "") {
+  const cleaned = code.trim();
+  if (!cleaned) return "";
+  if (!/^[A-Za-z0-9_-]{3,30}$/.test(cleaned)) return "";
+  return cleaned;
+}
 
-/* --------------------------- Utility / Root route --------------------------- */
+function makeShortUrl(shortCode) {
+  return `${BASE_URL}/${shortCode}`;
+}
+
+/* ============================== Routes ============================== */
+
+// Root
 app.get("/", (_req, res) => {
   res.send(
     "URL Shortener API is live ✅ Try: /api/health, /api/debug/db, /api/debug/count, /api/admin/links"
   );
 });
 
-/* --------------------------------- Debug ---------------------------------- */
+// Health
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+
+/* ------------------------------ Debug ------------------------------- */
+
+// Which DB am I on?
 app.get("/api/debug/db", (_req, res) => {
   const conn = mongoose.connection;
   const stateMap = { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" };
@@ -50,10 +74,11 @@ app.get("/api/debug/db", (_req, res) => {
     connected: conn?.readyState === 1,
     state: stateMap[conn?.readyState] ?? "unknown",
     host: conn?.host ?? null,
-    name: conn?.name ?? null, // <-- database name actually in use
+    name: conn?.name ?? null, // database name actually in use
   });
 });
 
+// Count docs in "links" collection
 app.get("/api/debug/count", async (_req, res) => {
   try {
     const db = mongoose.connection.db;
@@ -66,38 +91,18 @@ app.get("/api/debug/count", async (_req, res) => {
   }
 });
 
-// Quick admin view (development only)
-// GET /api/admin/links
-app.get("/api/admin/links", async (req, res) => {
-  const rows = await Link.find()
-    .sort({ createdAt: -1 })
-    .skip((page - 1) * limit)
-    .limit(limit)
-    .lean();
-
-  res.json({
-    rows: rows.map(r => ({
-      id: r._id,
-      createdAt: r.createdAt,
-      original_url: r.original_url,
-      visits: r.visits,
-      short_code: r.short_code,
-      short_url: makeShortUrl(r.short_code), 
-    })),
+// Create a test doc (optional)
+app.post("/api/debug/create-test", async (_req, res) => {
+  const doc = await Link.create({
+    original_url: "https://example.org/" + Date.now(),
+    short_code: nanoid(),
   });
+  res.json({ inserted: doc._id, short_url: makeShortUrl(doc.short_code) });
 });
 
+/* --------------------------- Public API ----------------------------- */
 
-/* --------------------------------- API ------------------------------------ */
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
-
-function sanitizeCode(code = "") {
-  const cleaned = code.trim();
-  if (!cleaned) return "";
-  if (!/^[A-Za-z0-9_-]{3,30}$/.test(cleaned)) return "";
-  return cleaned;
-}
-
+// POST /api/shorten
 app.post("/api/shorten", async (req, res) => {
   try {
     let { url, preferredCode } = req.body;
@@ -115,60 +120,48 @@ app.post("/api/shorten", async (req, res) => {
     if (existing) {
       return res.json({
         short_code: existing.short_code,
-        short_url: `${BASE_URL}/${existing.short_code}`,
+        short_url: makeShortUrl(existing.short_code),
         original_url: existing.original_url,
       });
     }
 
     // generate / accept preferred code
     let short_code = sanitizeCode(preferredCode) || nanoid();
-    if (await Link.findOne({ short_code })) short_code = nanoid();
+    if (await Link.exists({ short_code })) short_code = nanoid();
 
     const doc = await Link.create({ original_url: url, short_code });
 
     return res.status(201).json({
       short_code: doc.short_code,
-      short_url: `${BASE_URL}/${doc.short_code}`,
+      short_url: makeShortUrl(doc.short_code),
       original_url: doc.original_url,
     });
   } catch (err) {
-    console.error(err);
+    console.error("shorten error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
 
+// GET /:shortcode -> redirect + atomic visit count
 app.get("/:shortcode", async (req, res) => {
   try {
-    const link = await Link.findOne({ short_code: req.params.shortcode });
-    if (!link) return res.status(404).send("Not found");
-
-    link.visits += 1;
-    await link.save();
-
-    return res.redirect(302, link.original_url);
+    const { shortcode } = req.params;
+    const doc = await Link.findOneAndUpdate(
+      { short_code: shortcode },
+      { $inc: { visits: 1 } },
+      { new: true }
+    );
+    if (!doc) return res.status(404).send("Not found");
+    return res.redirect(302, doc.original_url);
   } catch (err) {
     console.error(err);
     res.status(500).send("Server error");
   }
 });
 
-/* ----------------------- Connect DB THEN start server ---------------------- */
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log("✅ MongoDB connected");
-    console.log("DB Name:", mongoose.connection.name);
-    console.log("Host   :", mongoose.connection.host);
-    app.listen(PORT, () => console.log(`API running  on http://localhost:${PORT}`));
-  })
-  .catch((err) => {
-    console.error("MongoDB connection error:", err.message);
-    process.exit(1);
-  });
+/* ------------------------------ Admin -------------------------------- */
 
-
-
-// --- admin auth (very simple API-key) ---
+// simple header auth
 function requireAdmin(req, res, next) {
   const key = req.header("x-admin-key");
   if (!key || key !== process.env.ADMIN_API_KEY) {
@@ -177,9 +170,9 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// --- list links with pagination ---
+// GET /api/admin/links?page=&limit=
 app.get("/api/admin/links", requireAdmin, async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit || "50", 10), 200);
+  const limit = Math.min(parseInt(req.query.limit || "20", 10), 200);
   const page  = Math.max(parseInt(req.query.page || "1", 10), 1);
   const skip  = (page - 1) * limit;
 
@@ -188,14 +181,12 @@ app.get("/api/admin/links", requireAdmin, async (req, res) => {
     Link.countDocuments()
   ]);
 
-  const base = (process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/+$/, "");
-
   res.json({
     page, limit, total,
     rows: rows.map(r => ({
       id: String(r._id),
       short_code: r.short_code,
-      short_url: `${base}/${r.short_code}`,   // <-- add this
+      short_url: makeShortUrl(r.short_code),
       original_url: r.original_url,
       visits: r.visits || 0,
       createdAt: r.createdAt,
@@ -203,8 +194,7 @@ app.get("/api/admin/links", requireAdmin, async (req, res) => {
   });
 });
 
-
-// --- totals ---
+// GET /api/admin/summary
 app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
   const [totalLinks, visitsAgg] = await Promise.all([
     Link.countDocuments(),
@@ -215,3 +205,54 @@ app.get("/api/admin/summary", requireAdmin, async (_req, res) => {
     total_visits: visitsAgg[0]?.visits || 0
   });
 });
+
+// DELETE /api/admin/links/:id (single)
+app.delete("/api/admin/links/:id", requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  await Link.deleteOne({ _id: id });
+  res.json({ ok: true, deleted: id });
+});
+
+// DELETE /api/admin/links  { ids: [] } (bulk)
+app.delete("/api/admin/links", requireAdmin, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (!ids.length) return res.status(400).json({ error: "ids array required" });
+  const result = await Link.deleteMany({ _id: { $in: ids } });
+  res.json({ ok: true, deletedCount: result.deletedCount });
+});
+
+/* ============================ DB & Server ============================ */
+
+async function start() {
+  try {
+    const uri = process.env.MONGODB_URI;
+    if (!uri) {
+      console.error("❌ MONGODB_URI is not set");
+      process.exit(1);
+    }
+
+    await mongoose.connect(uri, {
+      dbName: process.env.MONGODB_DB || "urlshortener",
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 10000,
+    });
+
+    mongoose.connection.on("connected", () => {
+      console.log(
+        "✅ Mongo connected:",
+        "db =", mongoose.connection.name,
+        "host =", mongoose.connection.host
+      );
+    });
+    mongoose.connection.on("error", (e) => console.error("❌ Mongo error", e));
+
+    app.listen(PORT, () =>
+      console.log(`🚀 API running on ${BASE_URL}`)
+    );
+  } catch (err) {
+    console.error("❌ Failed to start server", err);
+    process.exit(1);
+  }
+}
+
+start();
