@@ -96,3 +96,6 @@ npm run dev
 ### Admin Panel
 ![Admin Panel Screenshot](./screenshots/admin-panel.png)
 
+### Watch Demo - [Video]( https://drive.google.com/file/d/1qaDT7eGQl4KR0bAhBfEFzObL8q4kYalV/view?usp=sharing)
+
+
